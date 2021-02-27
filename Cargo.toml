@@ -1,0 +1,23 @@
+[package]
+name = "plex-webhook"
+version = "0.1.0"
+authors = ["Mike Zeller <mike@mikezeller.net>"]
+edition = "2018"
+
+[dependencies]
+warp = "0.3.0"
+bytes = "1.0.1"
+futures = "0.3.13"
+serde_json = "1.0.63"
+structopt = "0.3.21"
+tracing-log = "0.1.2"
+tracing-subscriber = "0.2.16"
+tracing = "0.1.25"
+
+[dependencies.serde]
+version = "1.0.123"
+features = [ "derive" ]
+
+[dependencies.tokio]
+version = "1.2.0"
+features = [ "fs", "macros", "process", "rt-multi-thread" ]
