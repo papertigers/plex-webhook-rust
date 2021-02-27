@@ -77,7 +77,12 @@ async fn call_command(app: &App, payload: Payload) -> Result<impl warp::Reply, w
                     Err(e) => tracing::error!("waiting on {:?} failed: {}", &path, e),
                 },
                 Err(_) => {
-                    tracing::error!("{:?} failed to execute in {} second(s)", &path, app.timeout)
+                    child.kill().await.expect("failed to kill child");
+                    tracing::error!(
+                        "{:?} killed -- failed to execute in {} second(s)",
+                        &path,
+                        app.timeout
+                    )
                 }
             }
         }
