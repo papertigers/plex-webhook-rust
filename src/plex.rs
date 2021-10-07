@@ -1,11 +1,13 @@
 use bytes::BufMut;
 use futures::TryStreamExt;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::time::timeout;
+use warp::http::StatusCode;
 use warp::multipart::Part;
 
 use crate::App;
@@ -45,12 +47,13 @@ pub struct Payload {
     pub player: Player,
 }
 
-async fn call_command(app: &App, payload: Payload) -> Result<impl warp::Reply, warp::Rejection> {
+// This is a best effort attempt at firing off the user supplied command
+async fn call_command(app: &App, payload: Payload) {
     let path = match tokio::fs::canonicalize(&app.cmd).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("cmd {:?}: {}", &app.cmd, e);
-            return Ok(warp::reply());
+            return;
         }
     };
 
@@ -88,41 +91,46 @@ async fn call_command(app: &App, payload: Payload) -> Result<impl warp::Reply, w
         }
         Err(e) => tracing::error!("failed to exec {:?}: {}", &path, e),
     }
-
-    Ok(warp::reply())
 }
 
 pub async fn handle_webhook(
     form: warp::multipart::FormData,
     app: Arc<App>,
-) -> Result<impl warp::Reply, warp::Rejection> {
-    let parts: Vec<Part> = form.try_collect().await.map_err(|e| {
-        tracing::error!("form tracing::error: {}", e);
-        warp::reject::reject()
-    })?;
+) -> Result<impl warp::Reply, Infallible> {
+    let parts: Vec<Part> = match form.try_collect().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("form tracing::error: {}", e);
+            return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     for p in parts {
         if p.name() != "payload" {
             continue;
         };
 
-        let value = p
+        let value = match p
             .stream()
             .try_fold(Vec::new(), |mut vec, data| {
                 vec.put(data);
                 async move { Ok(vec) }
             })
             .await
-            .map_err(|e| {
+        {
+            Ok(v) => v,
+            Err(e) => {
                 tracing::error!("tracing::error reading plex webhook payload: {}", e);
-                warp::reject::reject()
-            })?;
+                return Ok(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
 
         if let Ok(json) = serde_json::from_slice::<Payload>(&value) {
-            return call_command(&app, json).await;
+            tokio::spawn(async move { call_command(&app, json).await });
+            return Ok(StatusCode::OK);
         }
     }
 
     // Didn't find our payload in the FormData
-    Err(warp::reject::reject())
+    Ok(StatusCode::BAD_REQUEST)
 }
